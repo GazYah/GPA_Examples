@@ -59,60 +59,24 @@ def squash_land_use(
                 for cat in all_unique:
                     cat_arrays[cat][iy, ix] = percentages.get(cat, 0.0)
 
-    # --- Write output NetCDF ---
+    # --- Copy input NetCDF to output and add new variables ---
     with netCDF4.Dataset(out_nc_path, "w") as nc_out:
-        # Create dimensions
-        nc_out.createDimension('y', len(y))
-        nc_out.createDimension('x', len(x))
-        # Create x variable
-        if 'x' in nc_in.variables:
-            x_var = nc_out.createVariable('x', nc_in.variables['x'].dtype, ('x',))
-            x_var[:] = x
-            for attr in nc_in.variables['x'].ncattrs():
-                x_var.setncattr(attr, nc_in.variables['x'].getncattr(attr))
-        else:
-            x_var = nc_out.createVariable('x', x.dtype, ('x',))
-            x_var[:] = x
-
-        # Create y variable
-        if 'y' in nc_in.variables:
-            y_var = nc_out.createVariable('y', nc_in.variables['y'].dtype, ('y',))
-            y_var[:] = y
-            for attr in nc_in.variables['y'].ncattrs():
-                y_var.setncattr(attr, nc_in.variables['y'].getncattr(attr))
-        else:
-            y_var = nc_out.createVariable('y', y.dtype, ('y',))
-            y_var[:] = y
-
-        # Copy lat/lon variables
-        lat_in = nc_in.variables['lat']
-        lon_in = nc_in.variables['lon']
-
-        lat_fill = lat_in._FillValue if hasattr(lat_in, '_FillValue') else None
-        lon_fill = lon_in._FillValue if hasattr(lon_in, '_FillValue') else None
-
-        lat_var = nc_out.createVariable('lat', lat_in.dtype, lat_in.dimensions, zlib=True, fill_value=lat_fill)
-        lon_var = nc_out.createVariable('lon', lon_in.dtype, lon_in.dimensions, zlib=True, fill_value=lon_fill)
-        lat_var[:, :] = lat_in[:, :]
-        lon_var[:, :] = lon_in[:, :]
-        for attr in lat_in.ncattrs():
-            if attr != '_FillValue':
-                lat_var.setncattr(attr, lat_in.getncattr(attr))
-        for attr in lon_in.ncattrs():
-            if attr != '_FillValue':
-                lon_var.setncattr(attr, lon_in.getncattr(attr))
-
-        # Create a variable for each category
+        # Copy dimensions
+        for name, dim in nc_in.dimensions.items():
+            nc_out.createDimension(name, (len(dim) if not dim.isunlimited() else None))
+        # Copy all variables except for the new categories
+        for name, varin in nc_in.variables.items():
+            outVar = nc_out.createVariable(name, varin.datatype, varin.dimensions, zlib=True)
+            outVar.setncatts({k: varin.getncattr(k) for k in varin.ncattrs()})
+            outVar[:] = varin[:]
+        # Add new category variables
         for cat in all_unique:
             var = nc_out.createVariable(f'cat_{cat}', np.float32, ('y', 'x'), zlib=True)
             var[:, :] = cat_arrays[cat]
             var.units = "percent"
-            var.long_name = f"Percentage of category {cat} in 1000m cell"
-
-        # Copy global attributes related to CRS
-        for attr in nc_in.ncattrs():
-            if 'crs' in attr.lower() or 'spatial' in attr.lower() or 'proj' in attr.lower():
-                nc_out.setncattr(attr, nc_in.getncattr(attr))
+            var.long_name = f"Percentage of category {cat} in {cell_size}m cell"
+        # Copy global attributes
+        nc_out.setncatts({k: nc_in.getncattr(k) for k in nc_in.ncattrs()})
 
     nc_in.close()
     print(f"Saved output NetCDF: {out_nc_path}")
